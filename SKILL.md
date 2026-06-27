@@ -122,6 +122,24 @@ Implement each layer bottom-up:
 - 删除：确认对话框 + 成功后刷新列表
 - 所有操作成功后必须有用户可感知的反馈（如 Element Plus `ElMessage.success` / Ant Design `message.success`）
 
+### ⚠️ 验证前必须安装的环境依赖
+
+Phase 2 代码实现完成后，**不要立即说"验证完成"**。必须先确保运行环境就绪：
+
+```bash
+# 必须安装的运行时（如果还没有）
+# 数据库
+sudo apt-get install -y mysql-server || echo "MySQL 安装可选，也可用 H2 替代"
+# Java 运行时
+java -version 2>&1 || sudo apt-get install -y openjdk-17-jdk
+# Node.js
+node --version || (curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && apt-get install -y nodejs)
+# Maven
+mvn --version 2>&1 || sudo apt-get install -y maven
+```
+
+**只有环境就绪了，才能进入 Phase 3 真正做全链路验证。** 缺少运行环境而无法启动服务时，至少要用 `curl` 模拟请求或用代码审查 + 静态分析进行"离线验证"。
+
 ---
 
 ## Phase 3: 全链路验证（最关键）
@@ -135,88 +153,228 @@ Implement each layer bottom-up:
 - 新增数据成功但列表没有重新请求接口
 - 页面路径配了但 router 忘记 import
 
-### The Full Chain: From Click to DB and Back
+### ⚠️ 核心要求：必须在真实环境中逐层验证
 
-每个功能实现后，按照以下链条逐层验证：
+**不要只在代码层面检查**。必须启动数据库、启动后端、启动前端，用 `curl` / `浏览器` 发真实请求，用数据库客户端查真实数据，逐层验证整个链路。
 
-```
-[浏览器]
-    ↓ 用户点击按钮 → 检查浏览器 Network 面板
-    ↓ 是否有正确的 HTTP 请求发出？
-    ↓ 请求方法（GET/POST/PUT/DELETE）是否正确？
-    ↓ 请求 URL 是否完整（包含 context-path）？
-    ↓ 请求 Body 字段名是否和后端 DTO 一致？
+下面的验证流程每一步都包含**在容器环境中可执行的命令**，直接照着做。
 
-[前端 HTTP 客户端]
-    ↓ 是否经过了配置的 baseURL（或代理）？
-    ↓ Token/认证头是否已附加？
-    ↓ 响应拦截器（或统一处理逻辑）是否正确解包了后端返回的数据？
+---
 
-[后端 Controller]
-    ↓ 请求是否到达了正确的 @RequestMapping？
-    ↓ @RequestBody 是否成功反序列化为 DTO？
-    ↓ @Valid 校验是否触发？（参数错误会返回 400）
-    ↓ @PathVariable / @RequestParam 参数是否匹配？
+### 验证前置条件：搭建运行环境
 
-[后端 Service]
-    ↓ 声明式事务是否生效？（如 Spring @Transactional）
-    ↓ 业务逻辑是否正确？（状态转换、计算、权限判断）
-    ↓ Entity ↔ VO 转换是否正确？（字段名、类型）
+在开始验证前，必须先确保环境就绪。按顺序执行：
 
-[数据访问层 / ORM]
-    ↓ SQL 是否正确拼接？（动态条件是否生效？）
-    ↓ 参数传递方式是否正确？（防 SQL 注入）
-    ↓ 返回的列名和 Entity 字段是否映射正确？
+```bash
+# 1. 启动数据库（无 MySQL 则用 H2 内嵌数据库替代验证）
+#    如果项目配置了 MySQL 但环境没有 → 临时改为 H2，或安装 MySQL
+#    安装 MySQL:
+sudo apt-get install -y mysql-server
+sudo service mysql start
 
-[数据库]
-    ↓ SQL 是否真正执行了？（检查日志或数据库直连查询）
-    ↓ 受影响的行数是否符合预期？
-    ↓ 数据变更是否正确？（新增了一行？更新了字段？删除了？）
+# 2. 执行 DDL 建表
+mysql -u root -e "CREATE DATABASE IF NOT EXISTS your_db;"
+mysql -u root your_db < backend/src/main/resources/schema.sql
 
-[返回链路]
-    ↓ 后端返回的 Result.code 是否为 200？
-    ↓ 返回的数据结构是否和前端 TypeScript 类型一致？
-    ↓ 前端 HTTP 客户端是否正确解包了数据？
-    ↓ 前端是否用了解包后的数据更新页面？
+# 3. 编译并启动后端（带 SQL 日志输出）
+cd backend
+mvn compile
+# 在另一个终端或后台启动，确保控制台显示 SQL:
+mvn spring-boot:run > backend.log 2>&1 &
+# 等 10-15 秒让应用启动完成
+sleep 15
+curl -s http://localhost:8080/api/health  # 或任意一个简单接口确认后端已启动
 
-[UI 更新]
-    ↓ 列表是否重新请求并刷新？
-    ↓ 操作成功后是否有用户提示？
-    ↓ 是否有不应该显示的 UI 元素被隐藏了？
-    ↓ 页面 URL 是否正确跳转？
+# 4. 启动前端
+cd frontend
+npm install
+npm run dev > frontend.log 2>&1 &
 ```
 
-### Concrete Verification Steps (Checklist)
+如果环境限制无法全部启动（比如没有浏览器），至少要完成 **API 层 + 数据库层** 的验证。
 
-#### 1. 网络层验证
-- [ ] 打开浏览器 F12 → Network 面板，执行操作
-- [ ] 确认有请求发出，检查：URL ✅ / Method ✅ / Status 200 ✅
-- [ ] 检查请求 Body 字段名是否和后端 DTO 一致
-- [ ] 检查请求 Headers：Content-Type ✅ / Authorization ✅
+---
 
-#### 2. 后端日志验证
-- [ ] 确认后端控制台/日志打印了 SQL 或数据访问日志
-- [ ] 确认 SQL 语句正确、参数正确
-- [ ] 确认没有异常堆栈（如有，先解决异常）
+### 逐层验证（每一步都是可执行的命令）
 
-#### 3. 数据库验证
-- [ ] 对于新增操作：`SELECT * FROM xxx WHERE id = ?` 确认数据已插入
-- [ ] 对于更新操作：确认字段已更新
-- [ ] 对于删除操作：确认软删除标记已更新或记录已删除
+#### 第 1 层：API 层 — 用 curl 代替浏览器 Network 面板
 
-#### 4. 前端 UI 验证
-- [ ] 新增/修改/删除后，数据是否自动刷新？（不需要手动刷新页面）
-- [ ] 是否有多余的 UI 元素没有隐藏？（比如管理员按钮普通用户也能看到）
-- [ ] 列表页是否覆盖了四种状态：loading / error / empty / data
-- [ ] 操作失败时是否显示了正确的错误信息
-- [ ] 操作成功后是否显示了成功提示
+**不要等着去点浏览器**，直接用 `curl` 验证每个接口：
 
-#### 5. 边界条件验证
-- [ ] 提交空表单是否提示必填字段？
-- [ ] 输入超长内容是否被截断或提示？
-- [ ] 连续快速点击提交按钮是否会重复提交？
-- [ ] 搜索无结果时是否显示空状态？
-- [ ] 网络断开时是否有错误提示？
+```bash
+# === 1.1 新增操作 ===
+echo "=== 1.1 POST 新增 ==="
+curl -s -X POST http://localhost:8080/api/articles \
+  -H "Content-Type: application/json" \
+  -d '{"title":"测试文章","content":"这是内容","author":"test"}'
+# ✅ 预期: {"code":200,"message":"success","data":{"id":1,"title":"测试文章",...}}
+# ❌ 如果返回 404 → URL 路径不匹配
+# ❌ 如果返回 400 → 参数校验失败或字段名不对
+# ❌ 如果返回 500 → 看后端日志
+
+# === 1.2 列表查询（分页）===
+echo "=== 1.2 GET 列表 ==="
+curl -s "http://localhost:8080/api/articles?pageNum=1&pageSize=10"
+# ✅ 预期: {"code":200,"data":{"records":[...],"total":1,"pageNum":1,"pageSize":10}}
+
+# === 1.3 更新操作 ===
+echo "=== 1.3 PUT 更新 ==="
+curl -s -X PUT http://localhost:8080/api/articles/1 \
+  -H "Content-Type: application/json" \
+  -d '{"title":"已更新","content":"新内容","author":"test"}'
+# ✅ 预期: code 200
+
+# === 1.4 删除操作 ===
+echo "=== 1.4 DELETE 删除 ==="
+curl -s -X DELETE http://localhost:8080/api/articles/1
+# ✅ 预期: code 200
+
+# === 1.5 再次查询确认删除 ===
+echo "=== 1.5 验证删除 ==="
+curl -s "http://localhost:8080/api/articles/1"
+# ✅ 预期: 返回为空或 data 为 null（取决于设计）
+
+# === 1.6 边界：必填字段校验 ===
+echo "=== 1.6 空标题验证 ==="
+curl -s -X POST http://localhost:8080/api/articles \
+  -H "Content-Type: application/json" \
+  -d '{"content":"无标题","author":"test"}'
+# ✅ 预期: 返回 400 或 code=400，提示标题不能为空
+
+# === 1.7 边界：无效 ID ===
+echo "=== 1.7 无效 ID ==="
+curl -s http://localhost:8080/api/articles/99999
+# ✅ 预期: 返回错误提示，而不是 500 或空数据
+```
+
+**验证要点（对应全链路图中的各个环节）**：
+
+| 检查点 | 对应链路位置 | 怎么检查 |
+|-------|------------|---------|
+| URL 和 context-path 拼接正确？ | 浏览器 → HTTP 客户端 | curl 的 URL 就是前端实际请求的 URL |
+| 请求方法正确？ | 浏览器 → HTTP 客户端 | `-X POST` / `-X PUT` / `-X DELETE` 是否对应后端注解 |
+| Body 字段名和后端 DTO 匹配？ | HTTP 客户端 → Controller | 检查 curl 返回的 data 中字段名是否完整 |
+| 后端返回了统一 Result 格式？ | Controller → 返回链路 | 检查返回的 JSON 是否有 `code`、`message`、`data` |
+| 响应数据结构一致？ | 后端 → 前端 | 返回的 data 结构是否和前端 TypeScript 类型一致 |
+
+#### 第 2 层：数据库层 — 用 SQL 验证数据变更
+
+```bash
+# === 2.1 新增后验证 ===
+mysql -u root your_db -e "SELECT id, title, content, author, created_at FROM articles ORDER BY id DESC LIMIT 1;"
+# ✅ 预期: 显示刚刚插入的数据
+
+# === 2.2 更新后验证 ===
+mysql -u root your_db -e "SELECT id, title, content FROM articles WHERE id=1;"
+# ✅ 预期: 标题和内容已更新
+
+# === 2.3 软删除后验证 ===
+mysql -u root your_db -e "SELECT id, title, is_deleted FROM articles ORDER BY id DESC LIMIT 1;"
+# ✅ 预期: is_deleted = 1
+
+# === 2.4 列表查询 SQL 验证 ===
+mysql -u root your_db -e "EXPLAIN SELECT * FROM articles WHERE author='test';"
+# ✅ 检查 type 列，确保不是 ALL（全表扫描）
+```
+
+**验证要点**：
+
+| 检查点 | 对应位置 | 怎么检查 |
+|-------|---------|---------|
+| SQL 真正执行了？ | 数据访问层 → 数据库 | mysql 命令行直查确认数据已写入 |
+| 受影响行数正确？ | 数据库 | `ROW_COUNT()` 或看返回结果数量 |
+| 软删除生效？ | 数据访问层 | `is_deleted` 字段是否正确标记 |
+| 索引起作用？ | 数据库 | `EXPLAIN` 看 type 列 |
+
+#### 第 3 层：前端层 — 构建 + 编译检查
+
+```bash
+# === 3.1 TypeScript 编译检查 ===
+cd frontend
+npx vue-tsc --noEmit
+# ✅ 预期: 无错误输出，exit code 0
+# ❌ 有类型错误 → 修复后再继续
+
+# === 3.2 Vite 构建 ===
+npx vite build
+# ✅ 预期: 构建成功，生成 dist/ 目录
+# ❌ 如果 Rolldown/Vite 报 resolve 错误 → @ 别名未配置或 import 路径错误
+
+# === 3.3 （可选）启动 dev server 后用 curl 验证前端 HTML 是否能加载 ===
+npm run dev > /tmp/frontend-dev.log 2>&1 &
+sleep 3
+curl -s http://localhost:5173 | head -20
+# ✅ 预期: 返回 HTML，包含 <div id="app"> 等
+```
+
+#### 第 4 层：完整链路 — 若浏览器可用
+
+```bash
+# 如果环境支持 GUI（如 OpenHands 的浏览器工具）：
+# 1. 浏览器打开前端页面
+# 2. 打开 DevTools → Network 面板
+# 3. 执行新增操作
+# 4. 检查 Network 面板：请求 URL / Method / Status / Request Body
+# 5. 检查页面：toast 提示 / 列表刷新 / URL 跳转
+```
+
+**验证要点**：
+
+| 检查点 | 怎么检查 |
+|-------|---------|
+| 新增后列表自动刷新？ | 操作完成后看列表数据是否包含新条目 |
+| 操作成功有 toast？ | 页面右上角是否有成功提示 |
+| 空数据有提示？ | 清空条件搜索，看是否显示 `<el-empty>` |
+| loading 状态？ | 刷新页面时是否有加载动画 |
+| 多余按钮没隐藏？ | 检查 `v-if` 条件对应的元素是否在非条件下隐藏 |
+| 路由跳转后正常渲染？ | 直接访问各路由 URL 看页面是否正常 |
+
+---
+
+### 验证失败时的排查路径
+
+如果上面任何一步失败，按以下顺序排查（不要跳步）：
+
+```
+curl 返回 404
+  → 检查 curl 中的 URL 是否与后端 @RequestMapping + context-path 一致
+  → 检查后端是否真的启动了（journalctl 或 ps aux | grep java）
+
+curl 返回 400
+  → 检查请求 Body 的字段名是否与后端 DTO 字段名完全一致
+  → 检查 DTO 上的 @NotBlank/@NotNull 是否把可选字段变成必填了
+
+curl 返回 500
+  → 看后端日志：tail -100 backend.log
+  → 找 Exception 堆栈
+  → 最常见的：SQL 语法错误、空指针、MyBatis 映射错误
+
+curl 返回 200 但 data 为 null 或字段不对
+  → 检查 Service 层 Entity → VO 转换
+  → 检查 MyBatis resultMap 字段映射
+
+curl 正确但前端页面空白/报错
+  → 看浏览器控制台（或前端日志）
+  → 检查 router import 路径是否正确
+  → 检查 API 模块的调用路径是否和 curl 测试通过的路径一致
+  → 检查 Axios response interceptor 是否正确解包
+```
+
+### 验证通过标准
+
+一个功能只有同时满足以下条件，才算**真正完成**：
+
+- [x] curl 新增 → 返回 200 + 包含 id 的数据
+- [x] curl 查询 → 返回分页数据，包含刚才新增的记录
+- [x] curl 更新 → 返回 200，数据库确认字段已变更
+- [x] curl 删除 → 返回 200，数据库确认 is_deleted=1
+- [x] curl 空标题 → 返回 400 或业务错误码
+- [x] SQL 日志输出正常，无异常堆栈
+- [x] TypeScript 编译无报错
+- [x] Vite 构建成功
+- [x] 前端列表显示了更新后的数据
+
+**缺少任何一项，都不能说"验证完成"。**
 
 ---
 
@@ -270,32 +428,43 @@ Implement each layer bottom-up:
 
 ---
 
-## 全链路验证示例（以「新增文章」为例）
+## 全链路验证示例（以「新增文章」为例，含可执行命令）
 
-假设实现了 Article 的新增功能，验证过程：
+假设实现了 Article 的新增功能，完整的验证过程应如下执行：
 
+```bash
+# ========== 第 1 步：启动环境 ==========
+sudo service mysql start
+cd backend && mvn spring-boot:run > backend.log 2>&1 &
+sleep 15
+
+# ========== 第 2 步：API 验证（用 curl） ==========
+# 新增
+curl -s -X POST http://localhost:8080/api/articles \
+  -H "Content-Type: application/json" \
+  -d '{"title":"测试","content":"内容","author":"admin"}'
+# ✅ 看到 {"code":200,"data":{"id":1,"title":"测试",...}}
+
+# 列表
+curl -s "http://localhost:8080/api/articles?pageNum=1&pageSize=10"
+# ✅ 看到 records 中有刚才新增的记录
+
+# ========== 第 3 步：数据库验证 ==========
+mysql -u root your_db -e "SELECT id, title, content FROM articles ORDER BY id DESC LIMIT 1;"
+# ✅ 看到刚才插入的数据
+
+# ========== 第 4 步：前端验证 ==========
+cd frontend && npx vue-tsc --noEmit && npx vite build
+# ✅ 编译通过，构建成功
+
+# ========== 第 5 步：边界验证 ==========
+curl -s -X POST http://localhost:8080/api/articles \
+  -H "Content-Type: application/json" \
+  -d '{"content":"无标题","author":"admin"}'
+# ✅ 返回 400，提示标题必填
 ```
-1. 打开浏览器 → Network 面板 → 点击"新增"按钮
-   ✅ 看到 POST /api/articles 请求
-   ✅ 状态码 200
-   ✅ Body 包含 { title, content, author }
 
-2. 看后端日志
-   ✅ SQL: INSERT INTO articles (title, content, author, ...) VALUES (..., ..., ..., ...)
-   ✅ 参数值正确
-
-3. 验证数据库
-   ✅ SELECT * FROM articles ORDER BY id DESC LIMIT 1 → 数据已插入
-
-4. 验证前端 UI
-   ✅ 页面自动跳转到列表页
-   ✅ 列表显示了新数据（不需要手动刷新）
-   ✅ 顶部出现绿色 toast: "Created successfully"
-
-5. 边界验证
-   ✅ 不填标题点提交 → 提示"Title is required"
-   ✅ 快速点两次提交 → 只创建了一条
-```
+**缺少任何一步验证，都不能说"验证完成"。**
 
 ## Project Architecture
 
