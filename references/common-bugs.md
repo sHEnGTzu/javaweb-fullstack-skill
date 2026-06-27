@@ -147,6 +147,41 @@ public Result<Void> create(@Valid @RequestBody ArticleDTO dto)
 
 ## Category B: 前端 UI Bug（数据变了但界面没变）
 
+### B00 — 前端按钮未绑定正确的函数（最常见！）
+
+**症状**: 点击页面上的按钮没有任何反应，或点完后报 JS 错误（如 `xxx is not a function`）
+
+**常见原因**:
+1. 模板 `@click="handleCreate"` 但 `<script>` 里函数名是 `handleAdd`
+2. 忘记在 `<script setup>` 中定义函数，或函数被写在了 `export default {}` 外部
+3. `v-for` 循环中传参写错：`@click="handleDelete(item.id)"` 但 item 作用域不对
+4. 引入的 API 模块路径写错（如 `import { listArticle } from '@/api/article'` 但实际导出是 `listArticles`）
+
+**检测方式（全链路验证—前端模板层）**:
+```
+→ 打开浏览器点击按钮
+→ Network 面板：有请求发出？→ 无请求 → 说明按钮没有绑定到函数
+→ 浏览器控制台（F12 Console）：有 JS 报错？
+→ 检查模板: 找到按钮的 @click 绑定的函数名
+→ 检查 script: 该函数名是否定义且导出了？
+→ 检查 API 模块: 调用的函数名是否与导出的一致？
+```
+
+**修复**: 确保模板 `@click` 绑定的函数名与 `<script>` 中定义的名字完全一致
+```vue
+<!-- ✅ 正确 -->
+<el-button @click="handleCreate">新增</el-button>
+<script setup>
+const handleCreate = async () => { ... }
+</script>
+
+<!-- ❌ 错误: 函数名不匹配 -->
+<el-button @click="handleCreate">新增</el-button>
+<script setup>
+const handleAdd = async () => { ... }   // handleCreate 不存在！
+</script>
+```
+
 ### B01 — 新增/修改/删除后列表不刷新（最常见！）
 
 **症状**: 操作后 URL 变了，数据也写进数据库了，但列表显示的还是旧数据，需要手动刷新页面
@@ -484,7 +519,8 @@ EXPLAIN SELECT ... FROM a LEFT JOIN b ON a.fk = b.id
 
 | 症状 | 优先排查 | 相关 Bug |
 |------|---------|---------|
-| 点击按钮没反应 | Network 面板看有没有请求发出 | A05 |
+| 点击按钮没反应 | Network 面板看有没有请求发出 | **B00**, A05 |
+| 点击按钮报 JS 错误 | 检查 @click 绑定的函数名是否与 script 中的定义一致 | **B00** |
 | 请求 404 | URL 是否正确？context-path 是否匹配？ | A01 |
 | 请求 405 | 请求方法是否正确？ | A02 |
 | 请求 400 | Body 字段名是否正确？参数是否缺失？ | A03, C07 |

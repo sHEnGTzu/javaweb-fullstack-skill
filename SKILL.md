@@ -1,27 +1,60 @@
 ---
 name: javaweb-fullstack
-description: This skill should be used when building a Java Web full-stack project with a frontend-backend separation architecture. Covers requirements analysis, layered backend implementation, frontend views, and full-chain verification from browser click to database. Technology-agnostic core with specific examples (Spring Boot / MyBatis / JPA / Vue 3 / React etc.).
+description: This skill should be used when building a Java Web full-stack project with a frontend-backend separation architecture. Uses a per-feature vertical slice workflow (逐个功能垂直切分): implement one complete feature end-to-end (DB → Backend → Frontend), then verify it (curl → SQL → browser click → auto-refresh check) before moving to the next feature. Technology-agnostic core with specific examples (Spring Boot / MyBatis / JPA / Vue 3 / React etc.).
 ---
 
 # Java Web Full-Stack Development Skill
 
-## Three-Phase Workflow
-
-Every feature must go through three phases **in order**:
+## ⚠️ 黄金法则（每次使用前必须读一遍）
 
 ```
-Phase 1: 需求分析 (Requirements Analysis)
-  ↓
-Phase 2: 分层实现 (Layered Implementation)  
-  ↓
-Phase 3: 全链路验证 (Full-Chain Verification)  ← 最关键的环节
-```
+法则 1: 一个功能做到底，再做下一个功能
+         不要在 Phase 2 把全部功能的后端实现完才开始做前端！
+         
+法则 2: 每实现一个功能的增/删/改/查，立刻做全链路验证
+         不打开浏览器实际测试过，就不算写完！
 
-Do NOT skip to implementation before completing the analysis phase. Do NOT mark a feature as done before completing the verification phase.
+法则 3: 不满足以下条件不得做下一个功能
+         ✅ 前端按钮点击 → 后端收到请求 → 数据库更新 → 前端自动刷新
+         ✅ 如果做不到以上任意一环，停下排查，不要继续写新功能
+```
 
 ---
 
-## Phase 1: 需求分析
+## 核心工作流：逐个功能垂直切分
+
+**不要一次实现所有功能！** 把需求分析里识别出的每个功能（如：车位管理、车辆管理、收费规则管理、停车记录管理）作为独立单元，逐个完成。
+
+对**每一个功能**，按以下流程执行完整周期后再做下一个：
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  功能 N（如「车位管理」）                                     │
+│                                                              │
+│  Phase 2-N: 实现该功能（替换 N 为当前功能编号）               │
+│  ├─ Step 1: 该功能的数据表设计 + SQL                          │
+│  ├─ Step 2: 该功能的后端 (Entity → Mapper → Service → Ctrl) │
+│  ├─ Step 3: 该功能的前端 (API 模块 + 页面)                    │
+│                                                              │
+│  Phase 3-N: 验证该功能 ← 不通过绝不做下一个！                │
+│  ├─ 第 1 层: curl 测 API（增/删/改/查 + 边界条件）           │
+│  ├─ 第 2 层: SQL 查数据库确认变更                            │
+│  ├─ 第 3 层: 打开浏览器，实际点击按钮操作                     │
+│  │   └─ 确认前端自动刷新显示最新数据                         │
+│  └─ 第 4 层: TypeScript + Vite 构建检查                      │
+│                                                              │
+│  → 全部通过才能开始「Phase 2-(N+1) + Phase 3-(N+1)」        │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**为什么必须这样做？** 如果先把全部后端写完再写全部前端再统一验证：
+- 一旦出问题，你不知道是哪个功能的哪一层断掉了
+- 前端调了 `/api/parking/spaces` 但后端只有 `/parkingSpaces`，等你发现时已经写了 5 个功能
+- 每个功能逐个做，问题立刻暴露、立刻修复
+
+---
+
+## Phase 1: 需求分析（一次性完成全部功能的分析）
 
 ### Purpose
 Before writing any code, produce a clear requirements analysis document. This prevents:
@@ -75,306 +108,325 @@ GET /api/articles
 
 ---
 
-## Phase 2: 分层实现
+## Phase 2-N: 实现「功能 N」
 
-Implement each layer bottom-up:
+选择一个功能（从 Phase 1 的分析中），对这个功能的每一层做到底。**做完并通过 Phase 3-N 验证后，才能做下一个功能。**
 
-```
-  DB → Entity → 数据访问层 → Service → Controller → Frontend API → View
-```
+> **编号规则**: 第一个功能是 Phase 2-1，第二个是 Phase 2-2，以此类推。
+> 如果需求分析有"车位管理、车辆管理、收费规则管理"三个功能：
+>   - Phase 2-1 + Phase 3-1: 车位管理
+>   - Phase 2-2 + Phase 3-2: 车辆管理
+>   - Phase 2-3 + Phase 3-3: 收费规则管理
 
-### Implementation Order for a CRUD Feature
+每一层的规范如下，对**当前这个功能**逐层实现：
 
-**Step 1: 数据库**
-- 编写 DDL 脚本（CREATE TABLE），包括字段类型、索引、默认值
+### Step 1: 该功能的数据库
+- 编写该功能所需的 DDL 脚本（CREATE TABLE）
 - 确保有 `id` 主键、软删除标记、`created_at`/`updated_at` 时间戳
 - 外键列建立索引
 
-**Step 2: Entity + 数据访问层**
-- Entity 类映射数据库表（如 JPA `@Entity` / MyBatis-Plus `@TableName` / 或直接编写 RowMapper）
+### Step 2: 该功能的 Entity + 数据访问层
+- Entity 类映射数据库表（如 JPA `@Entity` / MyBatis-Plus `@TableName`）
 - 主键标注（如 JPA `@Id` / MyBatis-Plus `@TableId`）
-- 数据访问接口（如 JPA `JpaRepository<T, ID>` / MyBatis-Plus `BaseMapper<T>` / MyBatis XML Mapper / Spring Data JDBC Repository）
-- 软删除配置（如 JPA `@Where` / MyBatis-Plus `@TableLogic` / 或手动过滤）
+- 数据访问接口（如 JPA `JpaRepository<T, ID>` / MyBatis-Plus `BaseMapper<T>`）
+- 软删除配置（如 JPA `@Where` / MyBatis-Plus `@TableLogic`）
 
-**Step 3: DTO + VO**
-- `XxxDTO`：接收前端请求参数，添加校验注解（如 Jakarta Validation / Hibernate Validator）
+### Step 3: 该功能的 DTO + VO
+- `XxxDTO`：接收前端请求参数，添加校验注解
 - `XxxVO`：返回给前端的数据结构，不包含数据库内部字段
-- `PageResult<T>`：统一分页返回格式
 
-**Step 4: Service**
+### Step 4: 该功能的 Service
 - 接口定义业务方法，Impl 实现具体逻辑
-- 涉及写操作的方法加声明式事务（如 Spring `@Transactional` / Guice `@Transactional` / 或手动 try-with-commit）
+- 涉及写操作的方法加声明式事务（如 `@Transactional(rollbackFor = Exception.class)`）
 - Entity ↔ VO 转换在 Service 层完成
 
-**Step 5: Controller**
-- REST 控制器定义端点（如 Spring `@RestController` / JAX-RS `@Path` / Micronaut `@Controller`）
-- 参数校验：`@Valid @RequestBody`（Spring）或 `@Valid` + `@BeanParam`（JAX-RS）
-- 返回统一格式包装
+### Step 5: 该功能的 Controller
+- REST 控制器定义端点
+- 参数校验：`@Valid @RequestBody`
+- 返回统一格式包装（Result<T>）
 
-**Step 6: 前端 API 模块**
-- 统一封装 HTTP 客户端（Axios / fetch / 或项目自带的请求库）
-- 配置 baseURL、超时时间、请求/响应拦截器
-- 每个方法标注返回类型，与后端 DTO/VO 对应
+### Step 6: 该功能的前端 API 模块
+- 在 `src/api/` 下创建该功能的 API 模块文件
+- 每个方法标注 TypeScript 返回类型，与后端 VO 对应
+- ⚠️ 确认 API 路径与后端 Controller 的 `@RequestMapping` + `context-path` 拼接后完全一致
 
-**Step 7: 前端页面**
-- 列表页：loading / error / empty / data 四种状态
-- 表单页：表单校验 + 提交中禁用按钮 + 成功后跳转或刷新
-- 删除：确认对话框 + 成功后刷新列表
-- 所有操作成功后必须有用户可感知的反馈（如 Element Plus `ElMessage.success` / Ant Design `message.success`）
+### Step 7: 该功能的前端页面（最关键步骤！）
 
-### ⚠️ 验证前必须安装的环境依赖
-
-Phase 2 代码实现完成后，**不要立即说"验证完成"**。必须先确保运行环境就绪：
-
-```bash
-# 必须安装的运行时（如果还没有）
-# 数据库
-sudo apt-get install -y mysql-server || echo "MySQL 安装可选，也可用 H2 替代"
-# Java 运行时
-java -version 2>&1 || sudo apt-get install -y openjdk-17-jdk
-# Node.js
-node --version || (curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && apt-get install -y nodejs)
-# Maven
-mvn --version 2>&1 || sudo apt-get install -y maven
+**列表页必须覆盖四个状态：**
+```vue
+<div v-if="loading">加载中...</div>
+<div v-else-if="error">错误: {{ error }} <button @click="fetchData">重试</button></div>
+<el-empty v-else-if="data.length === 0" description="暂无数据" />
+<el-table v-else :data="data">...</el-table>
 ```
 
-**只有环境就绪了，才能进入 Phase 3 真正做全链路验证。** 缺少运行环境而无法启动服务时，至少要用 `curl` 模拟请求或用代码审查 + 静态分析进行"离线验证"。
+**写操作后的自动刷新（最常出错！必须做到）：**
+```typescript
+// ✅ 新增成功 → 跳转列表页并刷新
+const handleCreate = async () => {
+  submitting.value = true
+  try {
+    await api.create(form.value)
+    ElMessage.success('新增成功')
+    router.push('/articles')        // 跳转回列表
+    // 注意：列表页的 onMounted/fetchData() 必须正确触发
+  } finally { submitting.value = false }
+}
 
----
+// ✅ 删除成功 → 当前页重新拉取数据
+const handleDelete = async (id: number) => {
+  await api.delete(id)
+  ElMessage.success('删除成功')
+  fetchData()  // ← 必须调用！不是等列表页自己刷新
+}
 
-## Phase 3: 全链路验证（最关键）
+// ✅ 修改成功 → 当前页重新拉取数据
+const handleUpdate = async () => {
+  submitting.value = true
+  try {
+    await api.update(id.value, form.value)
+    ElMessage.success('修改成功')
+    fetchData()  // ← 必须调用！
+  } finally { submitting.value = false }
+}
+```
 
-### Why This Phase Exists
+**提交按钮防重复：**
+```vue
+<el-button :loading="submitting" :disabled="submitting">提交</el-button>
+```
 
-大多数 Bug 不是因为代码写不出来，而是因为**某层之间的连接断了**：
-- 前端调了 `/api/articles` 但后端只配了 `/articles`
-- 前端的 DTO 字段名和后端的 `@RequestBody` 字段不匹配
-- 后端返回了数据但前端 response interceptor 没有正确 unwrap
-- 新增数据成功但列表没有重新请求接口
-- 页面路径配了但 router 忘记 import
+```typescript
+const submitting = ref(false)
+const submitForm = async () => {
+  submitting.value = true
+  try { ... } finally { submitting.value = false }
+}
+```
 
-### ⚠️ 核心要求：必须在真实环境中逐层验证
-
-**不要只在代码层面检查**。必须启动数据库、启动后端、启动前端，用 `curl` / `浏览器` 发真实请求，用数据库客户端查真实数据，逐层验证整个链路。
-
-下面的验证流程每一步都包含**在容器环境中可执行的命令**，直接照着做。
-
----
-
-### 验证前置条件：搭建运行环境
-
-在开始验证前，必须先确保环境就绪。按顺序执行：
+### ⚠️ 环境搭建（只在 Phase 2-1 时做一次，后续功能无需重复）
 
 ```bash
-# 1. 启动数据库（无 MySQL 则用 H2 内嵌数据库替代验证）
-#    如果项目配置了 MySQL 但环境没有 → 临时改为 H2，或安装 MySQL
-#    安装 MySQL:
-sudo apt-get install -y mysql-server
+# 数据库
+sudo apt-get install -y mysql-server || echo "可用 H2 替代"
 sudo service mysql start
 
-# 2. 执行 DDL 建表
+# Java 运行时
+java -version 2>&1 || sudo apt-get install -y openjdk-17-jdk
+
+# Node.js
+node --version || (curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && apt-get install -y nodejs)
+
+# Maven
+mvn --version 2>&1 || sudo apt-get install -y maven
+
+# 初始化数据库（只一次）
 mysql -u root -e "CREATE DATABASE IF NOT EXISTS your_db;"
 mysql -u root your_db < backend/src/main/resources/schema.sql
 
-# 3. 编译并启动后端（带 SQL 日志输出）
-cd backend
-mvn compile
-# 在另一个终端或后台启动，确保控制台显示 SQL:
-mvn spring-boot:run > backend.log 2>&1 &
-# 等 10-15 秒让应用启动完成
+# 编译并启动后端
+cd backend && mvn spring-boot:run > backend.log 2>&1 &
 sleep 15
-curl -s http://localhost:8080/api/health  # 或任意一个简单接口确认后端已启动
+curl -s http://localhost:8080/api/health
 
-# 4. 启动前端
-cd frontend
-npm install
-npm run dev > frontend.log 2>&1 &
+# 安装前端依赖并启动
+cd frontend && npm install && npm run dev > frontend.log 2>&1 &
 ```
-
-如果环境限制无法全部启动（比如没有浏览器），至少要完成 **API 层 + 数据库层** 的验证。
 
 ---
 
-### 逐层验证（每一步都是可执行的命令）
+## Phase 3: 逐个功能全链路验证
 
-#### 第 1 层：API 层 — 用 curl 代替浏览器 Network 面板
+实现完一个功能后，找到对应编号的验证子阶段执行。**全部通过才能做下一个功能。**
 
-**不要等着去点浏览器**，直接用 `curl` 验证每个接口：
+验证子阶段编号与 Phase 2 功能的实现顺序一一对应。如果需求分析中有 4 个功能：
+- Phase 2-1 → Phase 3-1（验证功能 1）
+- Phase 2-2 → Phase 3-2（验证功能 2）
+- ...
 
-```bash
-# === 1.1 新增操作 ===
-echo "=== 1.1 POST 新增 ==="
-curl -s -X POST http://localhost:8080/api/articles \
-  -H "Content-Type: application/json" \
-  -d '{"title":"测试文章","content":"这是内容","author":"test"}'
-# ✅ 预期: {"code":200,"message":"success","data":{"id":1,"title":"测试文章",...}}
-# ❌ 如果返回 404 → URL 路径不匹配
-# ❌ 如果返回 400 → 参数校验失败或字段名不对
-# ❌ 如果返回 500 → 看后端日志
-
-# === 1.2 列表查询（分页）===
-echo "=== 1.2 GET 列表 ==="
-curl -s "http://localhost:8080/api/articles?pageNum=1&pageSize=10"
-# ✅ 预期: {"code":200,"data":{"records":[...],"total":1,"pageNum":1,"pageSize":10}}
-
-# === 1.3 更新操作 ===
-echo "=== 1.3 PUT 更新 ==="
-curl -s -X PUT http://localhost:8080/api/articles/1 \
-  -H "Content-Type: application/json" \
-  -d '{"title":"已更新","content":"新内容","author":"test"}'
-# ✅ 预期: code 200
-
-# === 1.4 删除操作 ===
-echo "=== 1.4 DELETE 删除 ==="
-curl -s -X DELETE http://localhost:8080/api/articles/1
-# ✅ 预期: code 200
-
-# === 1.5 再次查询确认删除 ===
-echo "=== 1.5 验证删除 ==="
-curl -s "http://localhost:8080/api/articles/1"
-# ✅ 预期: 返回为空或 data 为 null（取决于设计）
-
-# === 1.6 边界：必填字段校验 ===
-echo "=== 1.6 空标题验证 ==="
-curl -s -X POST http://localhost:8080/api/articles \
-  -H "Content-Type: application/json" \
-  -d '{"content":"无标题","author":"test"}'
-# ✅ 预期: 返回 400 或 code=400，提示标题不能为空
-
-# === 1.7 边界：无效 ID ===
-echo "=== 1.7 无效 ID ==="
-curl -s http://localhost:8080/api/articles/99999
-# ✅ 预期: 返回错误提示，而不是 500 或空数据
-```
-
-**验证要点（对应全链路图中的各个环节）**：
-
-| 检查点 | 对应链路位置 | 怎么检查 |
-|-------|------------|---------|
-| URL 和 context-path 拼接正确？ | 浏览器 → HTTP 客户端 | curl 的 URL 就是前端实际请求的 URL |
-| 请求方法正确？ | 浏览器 → HTTP 客户端 | `-X POST` / `-X PUT` / `-X DELETE` 是否对应后端注解 |
-| Body 字段名和后端 DTO 匹配？ | HTTP 客户端 → Controller | 检查 curl 返回的 data 中字段名是否完整 |
-| 后端返回了统一 Result 格式？ | Controller → 返回链路 | 检查返回的 JSON 是否有 `code`、`message`、`data` |
-| 响应数据结构一致？ | 后端 → 前端 | 返回的 data 结构是否和前端 TypeScript 类型一致 |
-
-#### 第 2 层：数据库层 — 用 SQL 验证数据变更
-
-```bash
-# === 2.1 新增后验证 ===
-mysql -u root your_db -e "SELECT id, title, content, author, created_at FROM articles ORDER BY id DESC LIMIT 1;"
-# ✅ 预期: 显示刚刚插入的数据
-
-# === 2.2 更新后验证 ===
-mysql -u root your_db -e "SELECT id, title, content FROM articles WHERE id=1;"
-# ✅ 预期: 标题和内容已更新
-
-# === 2.3 软删除后验证 ===
-mysql -u root your_db -e "SELECT id, title, is_deleted FROM articles ORDER BY id DESC LIMIT 1;"
-# ✅ 预期: is_deleted = 1
-
-# === 2.4 列表查询 SQL 验证 ===
-mysql -u root your_db -e "EXPLAIN SELECT * FROM articles WHERE author='test';"
-# ✅ 检查 type 列，确保不是 ALL（全表扫描）
-```
-
-**验证要点**：
-
-| 检查点 | 对应位置 | 怎么检查 |
-|-------|---------|---------|
-| SQL 真正执行了？ | 数据访问层 → 数据库 | mysql 命令行直查确认数据已写入 |
-| 受影响行数正确？ | 数据库 | `ROW_COUNT()` 或看返回结果数量 |
-| 软删除生效？ | 数据访问层 | `is_deleted` 字段是否正确标记 |
-| 索引起作用？ | 数据库 | `EXPLAIN` 看 type 列 |
-
-#### 第 3 层：前端层 — 构建 + 编译检查
-
-```bash
-# === 3.1 TypeScript 编译检查 ===
-cd frontend
-npx vue-tsc --noEmit
-# ✅ 预期: 无错误输出，exit code 0
-# ❌ 有类型错误 → 修复后再继续
-
-# === 3.2 Vite 构建 ===
-npx vite build
-# ✅ 预期: 构建成功，生成 dist/ 目录
-# ❌ 如果 Rolldown/Vite 报 resolve 错误 → @ 别名未配置或 import 路径错误
-
-# === 3.3 （可选）启动 dev server 后用 curl 验证前端 HTML 是否能加载 ===
-npm run dev > /tmp/frontend-dev.log 2>&1 &
-sleep 3
-curl -s http://localhost:5173 | head -20
-# ✅ 预期: 返回 HTML，包含 <div id="app"> 等
-```
-
-#### 第 4 层：完整链路 — 若浏览器可用
-
-```bash
-# 如果环境支持 GUI（如 OpenHands 的浏览器工具）：
-# 1. 浏览器打开前端页面
-# 2. 打开 DevTools → Network 面板
-# 3. 执行新增操作
-# 4. 检查 Network 面板：请求 URL / Method / Status / Request Body
-# 5. 检查页面：toast 提示 / 列表刷新 / URL 跳转
-```
-
-**验证要点**：
-
-| 检查点 | 怎么检查 |
-|-------|---------|
-| 新增后列表自动刷新？ | 操作完成后看列表数据是否包含新条目 |
-| 操作成功有 toast？ | 页面右上角是否有成功提示 |
-| 空数据有提示？ | 清空条件搜索，看是否显示 `<el-empty>` |
-| loading 状态？ | 刷新页面时是否有加载动画 |
-| 多余按钮没隐藏？ | 检查 `v-if` 条件对应的元素是否在非条件下隐藏 |
-| 路由跳转后正常渲染？ | 直接访问各路由 URL 看页面是否正常 |
+每个验证子阶段都包含相同的 **4 层检查**，执行时把其中的 `xxx` 替换为当前功能名即可。
 
 ---
 
-### 验证失败时的排查路径
-
-如果上面任何一步失败，按以下顺序排查（不要跳步）：
+### Phase 3-1: 验证「功能 A」（如：车位管理）
 
 ```
-curl 返回 404
-  → 检查 curl 中的 URL 是否与后端 @RequestMapping + context-path 一致
-  → 检查后端是否真的启动了（journalctl 或 ps aux | grep java）
-
-curl 返回 400
-  → 检查请求 Body 的字段名是否与后端 DTO 字段名完全一致
-  → 检查 DTO 上的 @NotBlank/@NotNull 是否把可选字段变成必填了
-
-curl 返回 500
-  → 看后端日志：tail -100 backend.log
-  → 找 Exception 堆栈
-  → 最常见的：SQL 语法错误、空指针、MyBatis 映射错误
-
-curl 返回 200 但 data 为 null 或字段不对
-  → 检查 Service 层 Entity → VO 转换
-  → 检查 MyBatis resultMap 字段映射
-
-curl 正确但前端页面空白/报错
-  → 看浏览器控制台（或前端日志）
-  → 检查 router import 路径是否正确
-  → 检查 API 模块的调用路径是否和 curl 测试通过的路径一致
-  → 检查 Axios response interceptor 是否正确解包
+□ 实现完成 → 进入验证
 ```
 
-### 验证通过标准
+#### 第 1 层：API 验证（curl）
+```bash
+# 新增
+curl -s -X POST http://localhost:8080/api/xxx \
+  -H "Content-Type: application/json" \
+  -d '{"field1":"值1","field2":"值2"}'
+# ✅ 预期: {"code":200,"data":{"id":1,...}}
+# ❌ 404 → URL 不匹配  ❌ 400 → 字段名不对  ❌ 500 → 看后端日志
 
-一个功能只有同时满足以下条件，才算**真正完成**：
+# 列表查询
+curl -s "http://localhost:8080/api/xxx?pageNum=1&pageSize=10"
+# ✅ 预期: records 包含刚才新增的记录
 
-- [x] curl 新增 → 返回 200 + 包含 id 的数据
-- [x] curl 查询 → 返回分页数据，包含刚才新增的记录
-- [x] curl 更新 → 返回 200，数据库确认字段已变更
-- [x] curl 删除 → 返回 200，数据库确认 is_deleted=1
-- [x] curl 空标题 → 返回 400 或业务错误码
-- [x] SQL 日志输出正常，无异常堆栈
-- [x] TypeScript 编译无报错
-- [x] Vite 构建成功
-- [x] 前端列表显示了更新后的数据
+# 更新
+curl -s -X PUT http://localhost:8080/api/xxx/1 \
+  -H "Content-Type: application/json" \
+  -d '{"field1":"新值"}'
+# ✅ 预期: code 200
 
-**缺少任何一项，都不能说"验证完成"。**
+# 删除
+curl -s -X DELETE http://localhost:8080/api/xxx/1
+# ✅ 预期: code 200
+
+# 边界：缺必填字段
+curl -s -X POST http://localhost:8080/api/xxx \
+  -H "Content-Type: application/json" \
+  -d '{}'
+# ✅ 预期: 返回 400
+
+# 边界：无效 ID
+curl -s http://localhost:8080/api/xxx/99999
+# ✅ 预期: 返回错误提示，不是 500
+```
+
+#### 第 2 层：数据库验证（SQL）
+```bash
+mysql -u root your_db -e "SELECT id, field1, field2, created_at FROM xxx ORDER BY id DESC LIMIT 1;"
+mysql -u root your_db -e "SELECT id, is_deleted FROM xxx ORDER BY id DESC LIMIT 1;"
+```
+
+#### 第 3 层：前端浏览器验证
+用浏览器打开前端页面，执行以下操作。**每项操作成功后确认页面自动刷新显示最新数据，不依赖手动刷新。**
+
+| # | 操作 | 预期结果 |
+|---|------|---------|
+| 1 | 点击"新增"按钮 | 跳转到新增表单页 |
+| 2 | 填写表单并提交 | 弹 success toast → 自动跳转回列表 → 列表包含新数据 |
+| 3 | 点击"编辑"，修改字段后提交 | 弹 success toast → 列表显示修改后的数据 |
+| 4 | 点击"删除"，确认 | 弹 success toast → 列表不再显示该数据 |
+| 5 | 搜索框输入关键词 | 列表仅显示匹配的结果 |
+| 6 | 清空所有数据 | 显示"暂无数据"占位图 |
+
+同时打开浏览器 Network 面板，确认：请求有发出、URL 和方法正确、Body 字段名与后端一致。
+
+#### 第 4 层：前端构建检查
+```bash
+cd frontend && npx vue-tsc --noEmit && npx vite build
+```
+
+#### ✅ 功能 A 验证通过清单
+```
+□ POST 新增 → curl 200 + data.id 不为 null → 数据库查到记录 → 浏览器操作成功
+□ GET 查询 → curl 返回分页数据 → 浏览器列表显示数据
+□ PUT 更新 → curl 200 → 数据库字段已变更 → 浏览器显示更新后数据
+□ DELETE 删除 → curl 200 → 数据库 is_deleted=1 → 浏览器不再显示
+□ 缺字段 → curl 返回 400
+□ 无效 ID → curl 返回错误提示
+□ TypeScript 编译无报错
+□ Vite 构建成功
+```
+
+**全部 ☑ 后才能开始 Phase 2-3 或 Phase 3-2。** 如有失败，修复后重新跑所有检查项。
+
+---
+
+### Phase 3-2: 验证「功能 B」（如：车辆管理）
+
+```
+□ 功能 A 已完整验证通过 → 开始验证功能 B
+```
+
+#### 第 1 层：API 验证（curl）
+```bash
+# 新增
+curl -s -X POST http://localhost:8080/api/yyy \
+  -H "Content-Type: application/json" \
+  -d '{"field1":"值1","field2":"值2"}'
+# ✅ 预期: {"code":200,"data":{"id":1,...}}
+
+# 列表查询
+curl -s "http://localhost:8080/api/yyy?pageNum=1&pageSize=10"
+
+# 更新
+curl -s -X PUT http://localhost:8080/api/yyy/1 \
+  -H "Content-Type: application/json" \
+  -d '{"field1":"新值"}'
+
+# 删除
+curl -s -X DELETE http://localhost:8080/api/yyy/1
+
+# 边界：缺必填字段
+curl -s -X POST http://localhost:8080/api/yyy \
+  -H "Content-Type: application/json" \
+  -d '{}'
+
+# 边界：无效 ID
+curl -s http://localhost:8080/api/yyy/99999
+```
+
+#### 第 2 层：数据库验证（SQL）
+```bash
+mysql -u root your_db -e "SELECT id, field1, field2, created_at FROM yyy ORDER BY id DESC LIMIT 1;"
+mysql -u root your_db -e "SELECT id, is_deleted FROM yyy ORDER BY id DESC LIMIT 1;"
+```
+
+#### 第 3 层：前端浏览器验证
+用浏览器逐项操作，确认每个操作成功后前端自动刷新。
+
+| # | 操作 | 预期结果 |
+|---|------|---------|
+| 1 | 点击"新增" | 跳转表单页 |
+| 2 | 提交表单 | toast → 自动跳转 → 列表更新 |
+| 3 | 编辑提交 | toast → 列表更新 |
+| 4 | 删除确认 | toast → 列表更新 |
+| 5 | 搜索 | 过滤列表 |
+| 6 | 空数据 | 显示空状态 |
+
+#### 第 4 层：前端构建检查
+```bash
+cd frontend && npx vue-tsc --noEmit && npx vite build
+```
+
+#### ✅ 功能 B 验证通过清单
+```
+□ POST 新增 → curl 200 + data.id → 数据库查到 → 浏览器操作成功
+□ GET 查询 → curl 分页 → 浏览器显示
+□ PUT 更新 → curl 200 → 数据库变更 → 浏览器更新
+□ DELETE 删除 → curl 200 → 数据库 is_deleted=1 → 浏览器消失
+□ 缺字段 → curl 400
+□ 无效 ID → curl 错误提示
+□ TypeScript 编译通过
+□ Vite 构建成功
+```
+
+**全部 ☑ 后才能做下一个功能。如有失败，修复后重新跑所有检查项。**
+
+---
+
+### Phase 3-3: 验证「功能 C」（如：收费规则管理）
+
+重复上述模式，替换 API 路径和数据库表名为功能 C 对应的名称。
+
+#### ✅ 功能 C 验证通过清单
+```
+□ 增 □ 删 □ 改 □ 查 □ 边界 □ 编译 □ 构建
+```
+
+---
+
+### Phase 3-4: 验证「功能 D」（如：停车记录管理）
+
+重复上述模式，替换 API 路径和数据库表名为功能 D 对应的名称。
+
+#### ✅ 功能 D 验证通过清单
+```
+□ 增 □ 删 □ 改 □ 查 □ 边界 □ 编译 □ 构建
+```
+
+---
+
+### Phase 3-N: 验证更多功能
+
+按需添加，模式同上。
 
 ---
 
@@ -428,43 +480,45 @@ curl 正确但前端页面空白/报错
 
 ---
 
-## 全链路验证示例（以「新增文章」为例，含可执行命令）
+## Phase 3-N 验证示例（以「文章管理」为例说明）
 
-假设实现了 Article 的新增功能，完整的验证过程应如下执行：
+以下是**一个功能**做完后的完整验证过程（对应 Phase 2-N → Phase 3-N）。每个功能都应按此流程验证：
 
 ```bash
-# ========== 第 1 步：启动环境 ==========
-sudo service mysql start
-cd backend && mvn spring-boot:run > backend.log 2>&1 &
-sleep 15
-
-# ========== 第 2 步：API 验证（用 curl） ==========
-# 新增
+# ========== 第 1 步：API 验证 ==========
+# 新增 → 确认 id 回填
 curl -s -X POST http://localhost:8080/api/articles \
   -H "Content-Type: application/json" \
   -d '{"title":"测试","content":"内容","author":"admin"}'
 # ✅ 看到 {"code":200,"data":{"id":1,"title":"测试",...}}
 
-# 列表
+# 列表 → 确认包含刚才新增
 curl -s "http://localhost:8080/api/articles?pageNum=1&pageSize=10"
 # ✅ 看到 records 中有刚才新增的记录
 
-# ========== 第 3 步：数据库验证 ==========
-mysql -u root your_db -e "SELECT id, title, content FROM articles ORDER BY id DESC LIMIT 1;"
-# ✅ 看到刚才插入的数据
-
-# ========== 第 4 步：前端验证 ==========
-cd frontend && npx vue-tsc --noEmit && npx vite build
-# ✅ 编译通过，构建成功
-
-# ========== 第 5 步：边界验证 ==========
+# 边界 → 缺字段校验
 curl -s -X POST http://localhost:8080/api/articles \
   -H "Content-Type: application/json" \
   -d '{"content":"无标题","author":"admin"}'
-# ✅ 返回 400，提示标题必填
+# ✅ 返回 400
+
+# ========== 第 2 步：数据库验证 ==========
+mysql -u root your_db -e "SELECT id, title, content FROM articles ORDER BY id DESC LIMIT 1;"
+# ✅ 看到刚才插入的数据
+
+# ========== 第 3 步：前端浏览器验证 ==========
+# 用 OpenHands 浏览器打开前端页面
+# 点击"新增"→ 填数据 → 提交
+# ✅ 弹 success toast
+# ✅ 自动跳转回列表
+# ✅ 列表显示新数据
+
+# ========== 第 4 步：前端构建 ==========
+cd frontend && npx vue-tsc --noEmit && npx vite build
+# ✅ 编译通过，构建成功
 ```
 
-**缺少任何一步验证，都不能说"验证完成"。**
+**缺少任何一步，不能做下一个功能。**
 
 ## Project Architecture
 
